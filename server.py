@@ -113,12 +113,17 @@ def build_tree_lines(directory, prefix=""):
 
 @app.route("/")
 def index():
+    # Serve the main frontend page
     return render_template("index.html")
+
 
 @app.route("/api/users", methods=["GET"])
 def list_users():
     """Return a list of all registered usernames."""
+
+    # Load stored users and return only their usernames
     return jsonify({"users": list(load_users().keys())})
+
 
 @app.route("/api/users", methods=["POST"])
 def create_or_login():
@@ -126,27 +131,53 @@ def create_or_login():
     Register a new user or log in an existing one.
     Accepts JSON: { "username": "alice" }
     """
+
+    # Parse request JSON safely
     data = request.json or {}
     username = data.get("username", "").strip()
 
-    # Basic validation
+    # ---- Input validation ----
+
+    # Ensure username has minimum length
     if len(username) < 2:
         return jsonify({"error": "Username must be at least 2 characters"}), 400
+
+    # Prevent overly long usernames
     if len(username) > 32:
         return jsonify({"error": "Username too long (max 32 chars)"}), 400
+
+    # Allow only alphanumeric characters plus underscores and hyphens
     if not username.replace("_", "").replace("-", "").isalnum():
         return jsonify({"error": "Only letters, numbers, - and _ allowed"}), 400
 
+    # Load existing users from storage
     users = load_users()
-    if username in users:
-        # Existing user — just log them in
-        return jsonify({"message": f"Welcome back, {username}!", "username": username})
 
-    # New user — persist and provision their storage directory
-    users[username] = {"created": datetime.now().isoformat()}
+    # If user already exists, treat as login
+    if username in users:
+        return jsonify({
+            "message": f"Welcome back, {username}!",
+            "username": username
+        })
+
+    # ---- New user creation flow ----
+
+    # Store basic metadata for new user
+    users[username] = {
+        "created": datetime.now().isoformat()
+    }
+
+    # Persist updated user database
     save_users(users)
+
+    # Create user storage directory (if needed)
     user_root(username)
-    return jsonify({"message": "Account created!", "username": username}), 201
+
+    # Return success response for account creation
+    return jsonify({
+        "message": "Account created!",
+        "username": username
+    }), 201
 
 
 # ── Directory listing ──────────────────────────────────────────────────────
@@ -217,19 +248,42 @@ def list_directory(username):
 
 @app.route("/api/tree/<username>")
 def directory_tree(username):
-    """Return an ASCII tree diagram of a directory. Query param: ?path=/folder"""
+    """
+    Return an ASCII tree diagram of a directory.
+    Query param: ?path=/folder
+    """
+
+    # Verify the user exists
     if username not in load_users():
         return jsonify({"error": "User not found"}), 404
 
+    # Resolve the target directory from query parameter (default to root)
     target, err = resolve_path(username, request.args.get("path", "/"))
+
+    # Block access if path resolution fails (security restriction)
     if err:
         return jsonify({"error": err}), 403
+
+    # Ensure the target exists and is actually a directory
     if not target.exists() or not target.is_dir():
         return jsonify({"error": "Directory not found"}), 404
 
+    # Determine display name for root of the tree
+    # Use directory name if available, otherwise fallback to username
     root_label = target.name or secure_filename(username)
+
+    # Build ASCII tree structure:
+    # - Root directory line
+    # - Recursive child structure from helper function
     lines = [f"[D] {root_label}/"] + build_tree_lines(target)
-    return jsonify({"path": request.args.get("path", "/"), "diagram": "\n".join(lines)})
+
+    # Return JSON response containing:
+    # - original requested path
+    # - formatted ASCII tree diagram
+    return jsonify({
+        "path": request.args.get("path", "/"),
+        "diagram": "\n".join(lines)
+    })
 
 
 # ── Create directory ───────────────────────────────────────────────────────
@@ -240,25 +294,43 @@ def make_directory(username):
     Create a new sub-directory.
     Body: { "path": "/parent", "name": "new_folder" }
     """
+
+    # Verify the user exists
     if username not in load_users():
         return jsonify({"error": "User not found"}), 404
 
+    # Parse request JSON safely
     data = request.json or {}
+
+    # Get and sanitize folder name
     name = secure_filename(data.get("name", "").strip())
+
+    # Ensure folder name is valid
     if not name:
         return jsonify({"error": "Invalid folder name"}), 400
 
+    # Resolve parent directory path
     parent, err = resolve_path(username, data.get("path", "/"))
+
+    # Block access if path resolution fails (security restriction)
     if err:
         return jsonify({"error": err}), 403
+
+    # Ensure parent exists and is a directory
     if not parent.is_dir():
         return jsonify({"error": "Parent not found"}), 404
 
+    # Construct full path for new directory
     new_dir = parent / name
+
+    # Prevent overwriting existing directory/file
     if new_dir.exists():
         return jsonify({"error": "Folder already exists"}), 409
 
+    # Create the directory
     new_dir.mkdir()
+
+    # Return success response
     return jsonify({"message": f'Folder "{name}" created'})
 
 
@@ -270,27 +342,49 @@ def upload_file(username):
     Upload one or more files into a directory.
     Form fields: path (destination dir), file (one or more file parts)
     """
+
+    # Check if the user exists
     if username not in load_users():
         return jsonify({"error": "User not found"}), 404
 
+    # Resolve destination directory from form input (default to root "/")
     target, err = resolve_path(username, request.form.get("path", "/"))
+
+    # Block if path resolution fails (security restriction)
     if err:
         return jsonify({"error": err}), 403
+
+    # Ensure target is a valid directory
     if not target.is_dir():
         return jsonify({"error": "Target directory not found"}), 404
+
+    # Ensure at least one file was included in request
     if "file" not in request.files:
         return jsonify({"error": "No file provided"}), 400
 
-    saved = []
+    saved = []  # Track successfully saved filenames
+
+    # Loop through all uploaded files (supports multi-file upload)
     for file in request.files.getlist("file"):
+
+        # Sanitize filename to prevent unsafe paths or injection
         filename = secure_filename(file.filename or "")
+
+        # Only process valid filenames
         if filename:
+            # Save file into target directory
             file.save(target / filename)
             saved.append(filename)
 
+    # If nothing was actually saved, return error
     if not saved:
         return jsonify({"error": "No valid files"}), 400
-    return jsonify({"message": f"Uploaded {len(saved)} file(s)", "files": saved})
+
+    # Return success response with list of uploaded files
+    return jsonify({
+        "message": f"Uploaded {len(saved)} file(s)",
+        "files": saved
+    })
 
 
 # ── Download ───────────────────────────────────────────────────────────────
@@ -298,21 +392,38 @@ def upload_file(username):
 @app.route("/api/download/<username>")
 def download_file(username):
     """Serve a file as an attachment. Query param: ?path=/folder/file.txt"""
+
+    # Verify the user exists
     if username not in load_users():
         return jsonify({"error": "User not found"}), 404
 
+    # Get file path from query parameter
     rel = request.args.get("path", "")
+
+    # Ensure a path was provided
     if not rel:
         return jsonify({"error": "No path specified"}), 400
 
+    # Resolve the requested path within the user's allowed directory
     file_path, err = resolve_path(username, rel)
+
+    # Block access if path resolution fails (security restriction)
     if err:
         return jsonify({"error": err}), 403
+
+    # Ensure the path exists and is a file (not a directory)
     if not file_path.exists() or not file_path.is_file():
         return jsonify({"error": "File not found"}), 404
 
-    # send_from_directory requires an absolute directory path + filename
-    return send_from_directory(file_path.parent.resolve(), file_path.name, as_attachment=True)
+    # Serve the file as a downloadable attachment
+    # send_from_directory requires:
+    # - directory (absolute path)
+    # - filename
+    return send_from_directory(
+        file_path.parent.resolve(),
+        file_path.name,
+        as_attachment=True
+    )
 
 
 # ── Delete ─────────────────────────────────────────────────────────────────
@@ -323,23 +434,40 @@ def delete_item(username):
     Delete a file or directory (directories are removed recursively).
     Body: { "path": "/folder/file.txt" }
     """
+
+    # Check if the user exists
     if username not in load_users():
         return jsonify({"error": "User not found"}), 404
 
+    # Parse request JSON safely
     data = request.json or {}
+
+    # Get relative path of item to delete
     rel = data.get("path", "")
+
+    # Prevent deletion of root path for safety
     if not rel or rel == "/":
         return jsonify({"error": "Cannot delete root"}), 400
 
+    # Resolve the path within user's allowed directory
     item, err = resolve_path(username, rel)
+
+    # Block access if path resolution failed (security restriction)
     if err:
         return jsonify({"error": err}), 403
+
+    # Ensure the item actually exists
     if not item.exists():
         return jsonify({"error": "Not found"}), 404
+
+    # Extra safety check: prevent deleting the user's root directory
     if item == user_root(username):
         return jsonify({"error": "Cannot delete root"}), 400
 
+    # Delete directory recursively OR delete single file
     shutil.rmtree(item) if item.is_dir() else item.unlink()
+
+    # Return success message
     return jsonify({"message": f'"{item.name}" deleted'})
 
 
@@ -351,27 +479,42 @@ def move_item(username):
     Move a file or directory to a new parent directory.
     Body: { "src": "/old/path/item", "dst": "/new/parent" }
     """
+
+    # Verify the user exists
     if username not in load_users():
         return jsonify({"error": "User not found"}), 404
 
+    # Parse JSON request body safely
     data = request.json or {}
+
+    # Extract source item path and destination directory path
     src_rel, dst_rel = data.get("src", ""), data.get("dst", "")
+
+    # Ensure both fields are provided
     if not src_rel or not dst_rel:
         return jsonify({"error": "src and dst required"}), 400
 
+    # Resolve and validate source path
     src, err = resolve_path(username, src_rel)
     if err or not src.exists():
         return jsonify({"error": "Source not found"}), 404
 
+    # Resolve and validate destination directory path
     dst_dir, err = resolve_path(username, dst_rel)
     if err or not dst_dir.is_dir():
         return jsonify({"error": "Destination directory not found"}), 404
 
-    dest = dst_dir / src.name          # keep the same filename in the new location
+    # Build final destination path (keep original filename)
+    dest = dst_dir / src.name
+
+    # Prevent overwriting an existing file/folder
     if dest.exists():
         return jsonify({"error": f'"{src.name}" already exists in destination'}), 409
 
+    # Move the file or directory
     shutil.move(str(src), str(dest))
+
+    # Return success response
     return jsonify({"message": f'"{src.name}" moved'})
 
 
@@ -383,25 +526,40 @@ def rename_item(username):
     Rename a file or directory in-place.
     Body: { "path": "/folder/old_name.txt", "name": "new_name.txt" }
     """
+
+    # Check if the user exists in the system
     if username not in load_users():
         return jsonify({"error": "User not found"}), 404
 
+    # Parse JSON request body (fallback to empty dict if missing)
     data = request.json or {}
-    src_rel  = data.get("path", "")
-    new_name = secure_filename(data.get("name", "").strip())
 
+    # Original file path (relative) and new desired name
+    src_rel  = data.get("path", "")
+    new_name = secure_filename(data.get("name", "").strip())  # sanitize filename
+
+    # Validate required inputs
     if not src_rel or not new_name:
         return jsonify({"error": "path and name required"}), 400
 
+    # Resolve the absolute/safe path for the user
     src, err = resolve_path(username, src_rel)
+
+    # If path resolution failed or file doesn't exist, return error
     if err or not src.exists():
         return jsonify({"error": "Not found"}), 404
 
-    dest = src.parent / new_name       # same directory, different name
+    # Construct destination path in same directory with new filename
+    dest = src.parent / new_name
+
+    # Prevent overwriting an existing file/directory
     if dest.exists():
         return jsonify({"error": "Name already taken"}), 409
 
+    # Perform the rename operation
     src.rename(dest)
+
+    # Return success response with new name
     return jsonify({"message": f'Renamed to "{new_name}"'})
 
 
@@ -416,5 +574,5 @@ if __name__ == "__main__":
     # Flask/Werkzeug opens a TCP socket bound to port 8080 on all interfaces.
     # host="0.0.0.0"  → accept connections from any network (LAN, Tailscale, etc.)
     # port=8080       → the OS routes inbound TCP traffic on this port here
-    # debug=False     → no auto-reloader or interactive debugger in production
+    # debug=False 
     app.run(host="0.0.0.0", port=8080, debug=False)
