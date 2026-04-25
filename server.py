@@ -41,9 +41,16 @@ def save_users(users):
 
 def user_root(username):
     """Return (and create if needed) the storage directory for this user."""
+
+    # Build a safe directory name for the user under the base storage path
     path = BASE_STORAGE / secure_filename(username)
+
+    # Ensure the directory exists (creates parent folders if needed)
     path.mkdir(parents=True, exist_ok=True)
+
+    # Return the absolute user root directory
     return path
+
 
 def resolve_path(username, rel_path):
     """
@@ -55,32 +62,48 @@ def resolve_path(username, rel_path):
       - Sanitize every other segment with secure_filename
       - Finally confirm the result is still under the user's root
 
-    Returns (Path, None) on success, or (None, error_str) on failure.
+    Returns:
+      (Path, None) on success
+      (None, error_str) on failure
     """
+
+    # Get the root directory for this user (creates it if missing)
     root = user_root(username)
-    segments = [p for p in rel_path.replace("\\", "/").split("/") if p and p != "."]
 
-    safe = []
+    # Normalize path separators and split into segments
+    segments = [
+        p for p in rel_path.replace("\\", "/").split("/")
+        if p and p != "."
+    ]
+
+    safe = []  # holds sanitized, validated path segments
+
     for seg in segments:
-        if seg == "..":
-            if safe:
-                safe.pop()          # navigate up one level — but never past root
-        else:
-            safe.append(secure_filename(seg))   # sanitize each segment
 
+        # Handle parent directory traversal attempt
+        if seg == "..":
+            # Only go up one level if we are not already at root
+            if safe:
+                safe.pop()
+        else:
+            # Sanitize segment to prevent unsafe filenames or injection
+            safe.append(secure_filename(seg))
+
+    # Start from user root and rebuild the final path safely
     resolved = root
     for seg in safe:
         if seg:
             resolved = resolved / seg
 
-    # Final safety check: the resolved path must still be inside the user's root
+    # Final security check:
+    # Ensure resolved path is still inside the user's directory
     try:
         resolved.relative_to(root)
     except ValueError:
         return None, "Access denied"
 
+    # Return validated path
     return resolved, None
-
 
 # ── Formatting helpers ─────────────────────────────────────────────────────
 
@@ -189,50 +212,92 @@ def list_directory(username):
     Query param: ?path=/some/folder  (defaults to root "/")
     Returns dirs, files, breadcrumbs, and all known dirs for move picker.
     """
+
+    # Check if the user exists
     if username not in load_users():
         return jsonify({"error": "User not found"}), 404
 
+    # Resolve requested directory (default to root "/")
     target, err = resolve_path(username, request.args.get("path", "/"))
+
+    # Block access if path resolution fails
     if err:
         return jsonify({"error": err}), 403
+
+    # Ensure target exists and is a directory
     if not target.exists() or not target.is_dir():
         return jsonify({"error": "Directory not found"}), 404
 
+    # Containers for directory listing results
     dirs, files, total_size = [], [], 0
 
+    # Iterate through directory contents
+    # Sort: directories first, then files; alphabetically within each group
     for item in sorted(target.iterdir(), key=lambda x: (x.is_file(), x.name.lower())):
+
+        # Get filesystem metadata
         stat = item.stat()
+
+        # Format modification timestamp for display
         ts = datetime.fromtimestamp(stat.st_mtime).strftime("%b %d, %Y %H:%M")
+
+        # Handle directories
         if item.is_dir():
-            dirs.append({"name": item.name, "type": "dir", "modified": ts})
+            dirs.append({
+                "name": item.name,
+                "type": "dir",
+                "modified": ts
+            })
+
+        # Handle files
         else:
             sz = stat.st_size
-            total_size += sz
+            total_size += sz  # accumulate total size of files
+
             files.append({
-                "name": item.name, "type": "file",
-                "size": sz, "size_fmt": format_size(sz),
+                "name": item.name,
+                "type": "file",
+                "size": sz,
+                "size_fmt": format_size(sz),  # human-readable size
                 "ext": item.suffix.lstrip(".").upper() or "FILE",
                 "modified": ts,
             })
 
-    # Build breadcrumb trail from root → current directory
+    # ---- Breadcrumb generation ----
+
+    # Get user's root directory
     root = user_root(username)
+
     try:
+        # Get path segments relative to root
         rel_parts = target.relative_to(root).parts
+
+        # Start breadcrumb trail at Home
         crumbs = [{"name": "Home", "path": "/"}]
+
+        # Build incremental path for navigation
         cur = Path("/")
         for part in rel_parts:
             cur = cur / part
-            crumbs.append({"name": part, "path": str(cur).replace("\\", "/")})
+            crumbs.append({
+                "name": part,
+                "path": str(cur).replace("\\", "/")
+            })
+
     except ValueError:
+        # Fallback if something goes wrong (safety case)
         crumbs = [{"name": "Home", "path": "/"}]
 
-    # Collect every sub-directory for the "move to" destination picker
+    # ---- Build full directory list for "move to" UI ----
+
+    # Include root plus all discovered subdirectories
     all_dirs = ["/"] + [
         "/" + str(p.relative_to(root)).replace("\\", "/")
-        for p in sorted(root.rglob("*")) if p.is_dir()
+        for p in sorted(root.rglob("*"))
+        if p.is_dir()
     ]
 
+    # Return structured directory listing response
     return jsonify({
         "path": request.args.get("path", "/"),
         "breadcrumbs": crumbs,
