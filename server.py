@@ -636,8 +636,11 @@ if __name__ == "__main__":
     print("  http://0.0.0.0:8080")
     print("=" * 50)
 
-    # Flask/Werkzeug opens a TCP socket bound to port 8080 on all interfaces.
-    # host="0.0.0.0"  → accept connections from any network (LAN, Tailscale, etc.)
-    # port=8080       → the OS routes inbound TCP traffic on this port here
-    # debug=False 
+    # Werkzeug internally does:
+    #   sock = socket.socket(AF_INET, SOCK_STREAM)
+    #   sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+    #   sock.bind(("0.0.0.0", 8080))
+    #   sock.listen(LISTEN_QUEUE)
+    # host="0.0.0.0" → INADDR_ANY, accept on all NICs
+    # port=8080      
     app.run(host="0.0.0.0", port=8080, debug=False)
