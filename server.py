@@ -3,12 +3,18 @@ CSC474/574 Cloud File System - Flask Web Server
 Provides a REST API for per-user file storage with directory operations.
 """
 
-import shutil
-from pathlib import Path
-from datetime import datetime
-from flask import Flask, request, jsonify, render_template, send_from_directory
-from werkzeug.utils import secure_filename
-import json
+import shutil                  # High-level file operations: copy, move, delete entire directory trees
+from pathlib import Path       # Object-oriented filesystem paths: replaces os.path string manipulation
+from datetime import datetime  # Timestamps for file metadata, upload records, logs
+from flask import (
+    Flask,                     # Core WSGI app: owns the TCP socket, routes HTTP requests
+    request,                   # Incoming HTTP request: headers, body, form data, uploaded files
+    jsonify,                   # Serializes Python dicts → JSON HTTP responses with correct Content-Type
+    render_template,           # Renders Jinja2 HTML templates from the /templates directory
+    send_from_directory        # Safely serves a file from a directory as a download/static response
+)
+from werkzeug.utils import secure_filename  # Sanitizes uploaded filenames: strips ../ and shell-unsafe chars
+import json                    # Serializes/deserializes JSON for reading and writing config or metadata files
 
 # ── Configuration ──────────────────────────────────────────────────────────
 
