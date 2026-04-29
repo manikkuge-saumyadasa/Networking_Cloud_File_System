@@ -179,42 +179,12 @@ button {
   flex-wrap: wrap;
 }
 
-/* ── Drop zone ── */
-.drop-zone {
-  border: 2px dashed #ccc;
-  border-radius: 6px;
-  padding: 24px;
-  text-align: center;
-  cursor: pointer;
-  position: relative;
-  margin-bottom: 12px;
-  color: #777;
-  font-size: 13px;
-  transition: border-color 0.15s, background 0.15s;
-}
-.drop-zone:hover, .drop-zone.over {
-  border-color: #888;
-  background: #fafafa;
-}
-.drop-zone input[type="file"] {
-  position: absolute; inset: 0;
-  opacity: 0; cursor: pointer;
-  width: 100%; height: 100%;
-}
-.drop-zone b { display: block; margin-bottom: 4px; color: #333; }
-
 /* ── Progress ── */
 .progress-wrap { margin-bottom: 12px; display: none; }
 .progress-track { height: 4px; background: #eee; border-radius: 2px; overflow: hidden; margin-top: 4px; }
 .progress-bar { height: 100%; background: #222; border-radius: 2px; width: 0%; transition: width 0.2s; }
 .progress-label { font-size: 12px; color: #777; }
 
-/* ── File table ── */
-.file-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
 
 .file-table th {
   text-align: left;
@@ -417,13 +387,6 @@ button {
       <button class="btn-secondary" onclick="openMkdir()">+ New Folder</button>
       <button class="btn-secondary" onclick="document.getElementById('file-input').click()">↑ Upload Files</button>
       <input type="file" id="file-input" multiple style="display:none" onchange="doUpload(this.files)" />
-    </div>
-
-    <!-- Drop zone -->
-    <div class="drop-zone" id="drop-zone">
-      <input type="file" id="drop-input" multiple onchange="doUpload(this.files)" />
-      <b>Drop files here to upload</b>
-      Click or drag & drop · Multiple files supported · Max 100 MB each
     </div>
 
     <!-- Progress -->
@@ -740,7 +703,6 @@ async function doUpload(files) {
       pw.style.display = 'none';
       pb.style.width = '0%';
       document.getElementById('file-input').value = '';
-      document.getElementById('drop-input').value = '';
     }, 700);
   }
 }
@@ -843,23 +805,6 @@ async function confirmRename() {
   } catch { toast('Rename failed', true); }
 }
 
-// ── Drag & drop ───────────────────────────────────────────────────────────
-const dz = document.getElementById('drop-zone');
-dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
-dz.addEventListener('dragleave', () => dz.classList.remove('over'));
-dz.addEventListener('drop', e => {
-  e.preventDefault();
-  dz.classList.remove('over');
-  if (currentUser) doUpload(e.dataTransfer.files);
-  else toast('Please log in first', true);
-});
-
-// Close modals on background click
-document.querySelectorAll('.modal-bg').forEach(bg => {
-  bg.addEventListener('click', e => { if (e.target === bg) bg.classList.remove('open'); });
-});
-
-// ── Escape HTML ───────────────────────────────────────────────────────────
 function esc(s) {
   return String(s)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;')
