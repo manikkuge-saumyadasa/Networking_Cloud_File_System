@@ -15,7 +15,7 @@ from flask import (
 )
 import json                    # Serializes/deserializes JSON for reading and writing config or metadata files
 
-# ── Configuration ──────────────────────────────────────────────────────────
+# ── Configuration 
 
 BASE_STORAGE = Path("storage")       # root folder holding all user directories
 BASE_STORAGE.mkdir(exist_ok=True)    # create it if it doesn't exist yet
@@ -27,7 +27,7 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_FILE_SIZE  # Flask enforces this before hitting route handlers
 
 
-# ── User persistence helpers ───────────────────────────────────────────────
+# ── User persistence helpers 
 
 def load_users():
     """Return the users dict from disk, or {} if the file doesn't exist yet."""
@@ -42,7 +42,7 @@ def save_users(users):
         json.dump(users, f, indent=2)
 
 
-# ── Path helpers ───────────────────────────────────────────────────────────
+# ── Path helpers ─
 
 def user_root(username):
     """Return (and create if needed) the storage directory for this user."""
@@ -77,8 +77,9 @@ def resolve_path(username, rel_path):
     return resolved, None
 
 
-# ── Formatting helpers ─────────────────────────────────────────────────────
+# ── Formatting helpers 
 
+# This converts raw byte counts into human-friendly strings with appropriate units (B, KB, MB, GB).
 def format_size(size_bytes):
     """Convert a byte count to a human-readable string (e.g. '3.2 MB')."""
     for unit in ["B", "KB", "MB", "GB"]:
@@ -87,6 +88,7 @@ def format_size(size_bytes):
         size_bytes /= 1024
     return f"{size_bytes:.1f} TB"
 
+# This helps with the ASCII tree generation by recursively building lines with proper prefixes and branch characters.
 def build_tree_lines(directory, prefix=""):
     """Recursively build ASCII tree lines for a directory."""
     # Sort: directories first, then files, both alphabetically
@@ -104,7 +106,7 @@ def build_tree_lines(directory, prefix=""):
     return lines
 
 
-# ── User routes ────────────────────────────────────────────────────────────
+# ── User routes 
 
 @app.route("/")
 def index():
@@ -165,7 +167,7 @@ def create_or_login():
     }), 201
 
 
-# ── Directory listing ──────────────────────────────────────────────────────
+# ── Directory listing 
 
 @app.route("/api/list/<username>")
 def list_directory(username):
@@ -271,7 +273,7 @@ def list_directory(username):
     })
 
 
-# ── ASCII directory tree ───────────────────────────────────────────────────
+# ── ASCII directory tree 
 
 @app.route("/api/tree/<username>")
 def directory_tree(username):
@@ -310,7 +312,7 @@ def directory_tree(username):
     })
 
 
-# ── Create directory ───────────────────────────────────────────────────────
+# ── Create directory 
 
 @app.route("/api/mkdir/<username>", methods=["POST"])
 def make_directory(username):
@@ -358,7 +360,7 @@ def make_directory(username):
     return jsonify({"message": f'Folder "{name}" created'})
 
 
-# ── Upload ─────────────────────────────────────────────────────────────────
+# ── Upload 
 
 @app.route("/api/upload/<username>", methods=["POST"])
 def upload_file(username):
@@ -411,7 +413,7 @@ def upload_file(username):
     })
 
 
-# ── Download ───────────────────────────────────────────────────────────────
+# ── Download
 
 @app.route("/api/download/<username>")
 def download_file(username):
@@ -450,7 +452,7 @@ def download_file(username):
     )
 
 
-# ── Delete ─────────────────────────────────────────────────────────────────
+# ── Delete 
 
 @app.route("/api/delete/<username>", methods=["DELETE"])
 def delete_item(username):
@@ -495,7 +497,7 @@ def delete_item(username):
     return jsonify({"message": f'"{item.name}" deleted'})
 
 
-# ── Move ───────────────────────────────────────────────────────────────────
+# ── Move 
 
 @app.route("/api/move/<username>", methods=["POST"])
 def move_item(username):
@@ -542,7 +544,7 @@ def move_item(username):
     return jsonify({"message": f'"{src.name}" moved'})
 
 
-# ── Rename ─────────────────────────────────────────────────────────────────
+# ── Rename 
 
 @app.route("/api/rename/<username>", methods=["POST"])
 def rename_item(username):
@@ -587,7 +589,7 @@ def rename_item(username):
     return jsonify({"message": f'Renamed to "{new_name}"'})
 
 
-# ── Entry point ────────────────────────────────────────────────────────────
+# ── Entry point
 
 if __name__ == "__main__":
     print("=" * 50)
