@@ -13,7 +13,6 @@ from flask import (
     render_template,           # Renders Jinja2 HTML templates from the /templates directory
     send_from_directory        # Safely serves a file from a directory as a download/static response
 )
-from werkzeug.utils import secure_filename  # Sanitizes uploaded filenames: strips ../ and shell-unsafe chars
 import json                    # Serializes/deserializes JSON for reading and writing config or metadata files
 
 # ── Configuration ──────────────────────────────────────────────────────────
@@ -48,25 +47,20 @@ def save_users(users):
 def user_root(username):
     """Return (and create if needed) the storage directory for this user."""
 
-    # Build a safe directory name for the user under the base storage path
-    path = BASE_STORAGE / secure_filename(username)
+    # Build a directory path for the user under the base storage path
+    path = BASE_STORAGE / username
 
     # Ensure the directory exists (creates parent folders if needed)
     path.mkdir(parents=True, exist_ok=True)
 
-    # Return the absolute user root directory
+    # Return the user root directory
     return path
 
 
 def resolve_path(username, rel_path):
     """
-    Safely resolve a user-supplied relative path inside their storage root.
-
-    Strategy:
-      - Split the path into segments, skip empty parts and "."
-      - For ".." pop the last safe segment (never go above root)
-      - Sanitize every other segment with secure_filename
-      - Finally confirm the result is still under the user's root
+    Resolve a user-supplied relative path inside their storage root.
+    Joins the user's root directory with the given relative path.
 
     Returns:
       (Path, None) on success
@@ -76,40 +70,12 @@ def resolve_path(username, rel_path):
     # Get the root directory for this user (creates it if missing)
     root = user_root(username)
 
-    # Normalize path separators and split into segments
-    segments = [
-        p for p in rel_path.replace("\\", "/").split("/")
-        if p and p != "."
-    ]
+    # Join root with the relative path, stripping any leading slash
+    resolved = root / rel_path.lstrip("/")
 
-    safe = []  # holds sanitized, validated path segments
-
-    for seg in segments:
-
-        # Handle parent directory traversal attempt
-        if seg == "..":
-            # Only go up one level if we are not already at root
-            if safe:
-                safe.pop()
-        else:
-            # Sanitize segment to prevent unsafe filenames or injection
-            safe.append(secure_filename(seg))
-
-    # Start from user root and rebuild the final path safely
-    resolved = root
-    for seg in safe:
-        if seg:
-            resolved = resolved / seg
-
-    # Final security check:
-    # Ensure resolved path is still inside the user's directory
-    try:
-        resolved.relative_to(root)
-    except ValueError:
-        return None, "Access denied"
-
-    # Return validated path
+    # Return the resolved path
     return resolved, None
+
 
 # ── Formatting helpers ─────────────────────────────────────────────────────
 
@@ -165,19 +131,9 @@ def create_or_login():
     data = request.json or {}
     username = data.get("username", "").strip()
 
-    # ---- Input validation ----
-
-    # Ensure username has minimum length
-    if len(username) < 2:
-        return jsonify({"error": "Username must be at least 2 characters"}), 400
-
-    # Prevent overly long usernames
-    if len(username) > 32:
-        return jsonify({"error": "Username too long (max 32 chars)"}), 400
-
-    # Allow only alphanumeric characters plus underscores and hyphens
-    if not username.replace("_", "").replace("-", "").isalnum():
-        return jsonify({"error": "Only letters, numbers, - and _ allowed"}), 400
+    # Ensure a username was provided
+    if not username:
+        return jsonify({"error": "Username required"}), 400
 
     # Load existing users from storage
     users = load_users()
@@ -291,7 +247,7 @@ def list_directory(username):
             })
 
     except ValueError:
-        # Fallback if something goes wrong (safety case)
+        # Fallback if something goes wrong
         crumbs = [{"name": "Home", "path": "/"}]
 
     # ---- Build full directory list for "move to" UI ----
@@ -331,7 +287,7 @@ def directory_tree(username):
     # Resolve the target directory from query parameter (default to root)
     target, err = resolve_path(username, request.args.get("path", "/"))
 
-    # Block access if path resolution fails (security restriction)
+    # Block access if path resolution fails
     if err:
         return jsonify({"error": err}), 403
 
@@ -339,18 +295,15 @@ def directory_tree(username):
     if not target.exists() or not target.is_dir():
         return jsonify({"error": "Directory not found"}), 404
 
-    # Determine display name for root of the tree
     # Use directory name if available, otherwise fallback to username
-    root_label = target.name or secure_filename(username)
+    root_label = target.name or username
 
     # Build ASCII tree structure:
     # - Root directory line
     # - Recursive child structure from helper function
     lines = [f"[D] {root_label}/"] + build_tree_lines(target)
 
-    # Return JSON response containing:
-    # - original requested path
-    # - formatted ASCII tree diagram
+    # Return JSON response containing the path and formatted ASCII tree
     return jsonify({
         "path": request.args.get("path", "/"),
         "diagram": "\n".join(lines)
@@ -373,8 +326,8 @@ def make_directory(username):
     # Parse request JSON safely
     data = request.json or {}
 
-    # Get and sanitize folder name
-    name = secure_filename(data.get("name", "").strip())
+    # Get folder name from request
+    name = data.get("name", "").strip()
 
     # Ensure folder name is valid
     if not name:
@@ -383,7 +336,7 @@ def make_directory(username):
     # Resolve parent directory path
     parent, err = resolve_path(username, data.get("path", "/"))
 
-    # Block access if path resolution fails (security restriction)
+    # Block access if path resolution fails
     if err:
         return jsonify({"error": err}), 403
 
@@ -421,7 +374,7 @@ def upload_file(username):
     # Resolve destination directory from form input (default to root "/")
     target, err = resolve_path(username, request.form.get("path", "/"))
 
-    # Block if path resolution fails (security restriction)
+    # Block if path resolution fails
     if err:
         return jsonify({"error": err}), 403
 
@@ -438,8 +391,8 @@ def upload_file(username):
     # Loop through all uploaded files (supports multi-file upload)
     for file in request.files.getlist("file"):
 
-        # Sanitize filename to prevent unsafe paths or injection
-        filename = secure_filename(file.filename or "")
+        # Get the original filename as provided by the client
+        filename = file.filename or ""
 
         # Only process valid filenames
         if filename:
@@ -475,10 +428,10 @@ def download_file(username):
     if not rel:
         return jsonify({"error": "No path specified"}), 400
 
-    # Resolve the requested path within the user's allowed directory
+    # Resolve the requested path within the user's directory
     file_path, err = resolve_path(username, rel)
 
-    # Block access if path resolution fails (security restriction)
+    # Block access if path resolution fails
     if err:
         return jsonify({"error": err}), 403
 
@@ -516,14 +469,14 @@ def delete_item(username):
     # Get relative path of item to delete
     rel = data.get("path", "")
 
-    # Prevent deletion of root path for safety
+    # Prevent deletion of root path
     if not rel or rel == "/":
         return jsonify({"error": "Cannot delete root"}), 400
 
-    # Resolve the path within user's allowed directory
+    # Resolve the path within user's directory
     item, err = resolve_path(username, rel)
 
-    # Block access if path resolution failed (security restriction)
+    # Block access if path resolution failed
     if err:
         return jsonify({"error": err}), 403
 
@@ -607,13 +560,13 @@ def rename_item(username):
 
     # Original file path (relative) and new desired name
     src_rel  = data.get("path", "")
-    new_name = secure_filename(data.get("name", "").strip())  # sanitize filename
+    new_name = data.get("name", "").strip()
 
     # Validate required inputs
     if not src_rel or not new_name:
         return jsonify({"error": "path and name required"}), 400
 
-    # Resolve the absolute/safe path for the user
+    # Resolve the path for the user
     src, err = resolve_path(username, src_rel)
 
     # If path resolution failed or file doesn't exist, return error
@@ -648,5 +601,5 @@ if __name__ == "__main__":
     #   sock.bind(("0.0.0.0", 8080))
     #   sock.listen(LISTEN_QUEUE)
     # host="0.0.0.0" → INADDR_ANY, accept on all NICs
-    # port=8080      
+    # port=8080
     app.run(host="0.0.0.0", port=8080, debug=False)
